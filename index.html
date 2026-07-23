@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tap & Stock · Punto Escolar</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="shell">
+
+  <div class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="#E8A33D"/></svg>
+      Tap &amp; Stock
+    </div>
+    <nav class="nav">
+      <a href="index.html" class="active">Panel</a>
+      <a href="inventario.html">Inventario</a>
+      <a href="pos.html">Punto de venta</a>
+      <a href="finanzas.html">Finanzas</a>
+    </nav>
+  </div>
+
+  <div class="panel" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+    <div id="hero-cap" style="flex:none;"></div>
+    <div>
+      <h1 style="margin:0 0 6px;">Control de venta de cervezas</h1>
+      <p style="margin:0;color:var(--muted);max-width:520px;">
+        Carga tu stock, véndelo en el punto de venta con descuento automático,
+        emite tickets y revisa tus métricas — todo desde este navegador, sin servidores.
+      </p>
+    </div>
+  </div>
+
+  <div class="grid grid-3" style="margin-top:18px;">
+    <div class="kpi"><div class="label">Productos en catálogo</div><div class="value mono" id="kpi-productos">0</div></div>
+    <div class="kpi"><div class="label">Unidades en stock</div><div class="value mono" id="kpi-stock">0</div></div>
+    <div class="kpi"><div class="label">Ingresos (hoy)</div><div class="value mono" id="kpi-hoy">S/ 0.00</div></div>
+  </div>
+
+  <div class="grid grid-3" style="margin-top:18px;">
+    <a href="inventario.html" style="text-decoration:none;">
+      <div class="panel" style="height:100%;">
+        <h2 style="margin-top:0;">1 · Inventario</h2>
+        <p style="color:var(--muted);">Carga tus cervezas con foto, precio, costo y stock. El color de identificación se sugiere solo desde la imagen.</p>
+        <span class="btn btn-outline btn-sm">Abrir inventario →</span>
+      </div>
+    </a>
+    <a href="pos.html" style="text-decoration:none;">
+      <div class="panel" style="height:100%;">
+        <h2 style="margin-top:0;">2 · Punto de venta</h2>
+        <p style="color:var(--muted);">Vende con un toque por producto, cobra y descuenta el stock al instante. Emite el ticket al cliente.</p>
+        <span class="btn btn-outline btn-sm">Abrir punto de venta →</span>
+      </div>
+    </a>
+    <a href="finanzas.html" style="text-decoration:none;">
+      <div class="panel" style="height:100%;">
+        <h2 style="margin-top:0;">3 · Finanzas</h2>
+        <p style="color:var(--muted);">Ingresos, ganancia, productos top y métodos de pago, con historial completo de ventas.</p>
+        <span class="btn btn-outline btn-sm">Ver métricas →</span>
+      </div>
+    </a>
+  </div>
+
+  <div class="panel" id="alerta-stock-panel" style="margin-top:18px;display:none;">
+    <h2 style="margin-top:0;">Stock bajo</h2>
+    <div id="alerta-stock" class="product-grid"></div>
+  </div>
+
+  <p class="footer-note">Tap &amp; Stock — hecho para Punto Escolar · datos guardados en este navegador (localStorage)</p>
+</div>
+
+<script src="js/store.js"></script>
+<script>
+document.getElementById('hero-cap').innerHTML = capSVG('#E8A33D', 64);
+
+function renderResumen() {
+  const productos = Store.getProductos();
+  document.getElementById('kpi-productos').textContent = productos.length;
+  document.getElementById('kpi-stock').textContent = productos.reduce((s, p) => s + p.stock, 0);
+
+  const hoyInicio = new Date(); hoyInicio.setHours(0, 0, 0, 0);
+  const ventasHoy = Store.getVentas().filter(v => v.estado !== 'anulado' && new Date(v.fecha) >= hoyInicio);
+  document.getElementById('kpi-hoy').textContent = Store.formatMoney(ventasHoy.reduce((s, v) => s + v.total, 0));
+
+  const bajos = productos.filter(p => p.stock <= p.stockMin);
+  const panel = document.getElementById('alerta-stock-panel');
+  if (bajos.length) {
+    panel.style.display = 'block';
+    document.getElementById('alerta-stock').innerHTML = bajos.map(p => `
+      <div class="prod-card">
+        <span class="stock-badge low">${p.stock} u.</span>
+        <div class="top">
+          <div class="cap-wrap">${capSVG(p.color, 44)}${p.imagen ? `<img class="product-photo" src="${p.imagen}">` : ''}</div>
+          <div><div class="name">${p.nombre}</div><div class="cat">${p.categoria}</div></div>
+        </div>
+      </div>`).join('');
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+onDatosCambiaron(renderResumen);
+renderResumen();
+</script>
+</body>
+</html>

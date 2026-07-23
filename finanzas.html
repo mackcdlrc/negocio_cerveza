@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finanzas · Tap & Stock</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="shell">
+
+  <div class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="#E8A33D"/></svg>
+      Tap &amp; Stock
+    </div>
+    <nav class="nav">
+      <a href="index.html">Panel</a>
+      <a href="inventario.html">Inventario</a>
+      <a href="pos.html">Punto de venta</a>
+      <a href="finanzas.html" class="active">Finanzas</a>
+    </nav>
+  </div>
+
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+      <h2 style="margin:0;">Rango de fechas</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-outline btn-sm" onclick="setRango('hoy')">Hoy</button>
+        <button class="btn btn-outline btn-sm" onclick="setRango('semana')">Últimos 7 días</button>
+        <button class="btn btn-outline btn-sm" onclick="setRango('mes')">Últimos 30 días</button>
+        <button class="btn btn-outline btn-sm" onclick="setRango('todo')">Todo</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-3" style="margin-top:18px;">
+    <div class="kpi"><div class="label">Ingresos</div><div class="value mono" id="kpi-ingresos">S/ 0.00</div></div>
+    <div class="kpi"><div class="label">Ganancia</div><div class="value mono up" id="kpi-ganancia">S/ 0.00</div></div>
+    <div class="kpi"><div class="label">Ventas realizadas</div><div class="value mono" id="kpi-ventas">0</div></div>
+  </div>
+  <div class="grid grid-3" style="margin-top:14px;">
+    <div class="kpi"><div class="label">Ticket promedio</div><div class="value mono" id="kpi-promedio">S/ 0.00</div></div>
+    <div class="kpi"><div class="label">Unidades vendidas</div><div class="value mono" id="kpi-unidades">0</div></div>
+    <div class="kpi"><div class="label">Producto más vendido</div><div class="value" id="kpi-top" style="font-size:1.1rem;">—</div></div>
+  </div>
+
+  <div class="grid grid-2" style="margin-top:18px;align-items:start;">
+    <div class="panel">
+      <h2 style="margin-top:0;">Ingresos por día</h2>
+      <canvas id="chart-ingresos" height="220"></canvas>
+    </div>
+    <div class="panel">
+      <h2 style="margin-top:0;">Productos más vendidos</h2>
+      <canvas id="chart-productos" height="220"></canvas>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:18px;">
+    <h2 style="margin-top:0;">Métodos de pago</h2>
+    <canvas id="chart-pagos" height="120"></canvas>
+  </div>
+
+  <div class="panel" style="margin-top:18px;">
+    <h2 style="margin-top:0;">Historial de ventas</h2>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th>Ticket</th><th>Fecha</th><th>Items</th><th>Total</th><th>Pago</th><th>Estado</th><th></th></tr>
+        </thead>
+        <tbody id="tabla-ventas"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="footer-note">Tap &amp; Stock — métricas financieras para Punto Escolar</p>
+</div>
+
+<script src="js/store.js"></script>
+<script>
+let rangoActual = 'mes';
+let chartIngresos, chartProductos, chartPagos;
+
+function ventasEnRango() {
+  const ahora = new Date();
+  let desde = null;
+  if (rangoActual === 'hoy') {
+    desde = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+  } else if (rangoActual === 'semana') {
+    desde = new Date(ahora.getTime() - 7 * 24 * 3600 * 1000);
+  } else if (rangoActual === 'mes') {
+    desde = new Date(ahora.getTime() - 30 * 24 * 3600 * 1000);
+  }
+  return Store.getVentas().filter(v => {
+    if (v.estado === 'anulado') return false;
+    if (!desde) return true;
+    return new Date(v.fecha) >= desde;
+  });
+}
+
+function setRango(r) {
+  rangoActual = r;
+  document.querySelectorAll('.nav + .panel .btn-outline').forEach(b => {}); // noop, kept simple
+  renderTodo();
+}
+
+function renderKPIs(ventas) {
+  const ingresos = ventas.reduce((s, v) => s + v.total, 0);
+  const ganancia = ventas.reduce((s, v) => s + (v.ganancia ?? 0), 0);
+  const unidades = ventas.reduce((s, v) => s + v.items.reduce((a, i) => a + i.cantidad, 0), 0);
+  document.getElementById('kpi-ingresos').textContent = Store.formatMoney(ingresos);
+  document.getElementById('kpi-ganancia').textContent = Store.formatMoney(ganancia);
+  document.getElementById('kpi-ventas').textContent = ventas.length;
+  document.getElementById('kpi-promedio').textContent = Store.formatMoney(ventas.length ? ingresos / ventas.length : 0);
+  document.getElementById('kpi-unidades').textContent = unidades;
+
+  const conteoProductos = {};
+  ventas.forEach(v => v.items.forEach(i => {
+    conteoProductos[i.nombre] = (conteoProductos[i.nombre] || 0) + i.cantidad;
+  }));
+  const topEntry = Object.entries(conteoProductos).sort((a, b) => b[1] - a[1])[0];
+  document.getElementById('kpi-top').textContent = topEntry ? `${topEntry[0]} (${topEntry[1]} u.)` : '—';
+  return conteoProductos;
+}
+
+function renderChartIngresos(ventas) {
+  const porDia = {};
+  ventas.forEach(v => {
+    const dia = new Date(v.fecha).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' });
+    porDia[dia] = (porDia[dia] || 0) + v.total;
+  });
+  const labels = Object.keys(porDia);
+  const datos = Object.values(porDia);
+  if (chartIngresos) chartIngresos.destroy();
+  chartIngresos = new Chart(document.getElementById('chart-ingresos'), {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'Ingresos (S/)', data: datos, borderColor: '#E8A33D', backgroundColor: 'rgba(232,163,61,.15)', fill: true, tension: .3 }] },
+    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#a89a86' }, grid: { color: '#3a3024' } }, y: { ticks: { color: '#a89a86' }, grid: { color: '#3a3024' } } } }
+  });
+}
+
+function renderChartProductos(conteoProductos) {
+  const ordenado = Object.entries(conteoProductos).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (chartProductos) chartProductos.destroy();
+  chartProductos = new Chart(document.getElementById('chart-productos'), {
+    type: 'bar',
+    data: { labels: ordenado.map(o => o[0]), datasets: [{ label: 'Unidades vendidas', data: ordenado.map(o => o[1]), backgroundColor: '#C1682F' }] },
+    options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#a89a86' }, grid: { color: '#3a3024' } }, y: { ticks: { color: '#a89a86' }, grid: { display: false } } } }
+  });
+}
+
+function renderChartPagos(ventas) {
+  const porMetodo = {};
+  ventas.forEach(v => { porMetodo[v.metodoPago] = (porMetodo[v.metodoPago] || 0) + v.total; });
+  if (chartPagos) chartPagos.destroy();
+  chartPagos = new Chart(document.getElementById('chart-pagos'), {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(porMetodo),
+      datasets: [{ data: Object.values(porMetodo), backgroundColor: ['#E8A33D', '#C1682F', '#6f8f5f', '#a89a86', '#c1543f'] }]
+    },
+    options: { plugins: { legend: { position: 'right', labels: { color: '#F4EDE0' } } } }
+  });
+}
+
+function renderTablaVentas() {
+  const ventas = [...Store.getVentas()].reverse();
+  const tbody = document.getElementById('tabla-ventas');
+  if (!ventas.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);">Aún no se registran ventas.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = ventas.map(v => `
+    <tr>
+      <td class="mono">#${String(v.numeroTicket).padStart(5, '0')}</td>
+      <td>${Store.formatFecha(v.fecha)}</td>
+      <td>${v.items.reduce((s, i) => s + i.cantidad, 0)} u.</td>
+      <td class="mono">${Store.formatMoney(v.total)}</td>
+      <td>${v.metodoPago}</td>
+      <td><span class="tag ${v.estado}">${v.estado === 'anulado' ? 'Anulado' : 'Activo'}</span></td>
+      <td>${v.estado === 'anulado' ? '' : `<button class="btn btn-danger btn-sm" onclick="anular('${v.id}')">Anular</button>`}</td>
+    </tr>
+  `).join('');
+}
+
+function anular(id) {
+  if (!confirm('¿Anular esta venta? El stock de los productos se repondrá automáticamente.')) return;
+  Store.anularVenta(id);
+  renderTodo();
+}
+
+function renderTodo() {
+  const ventas = ventasEnRango();
+  const conteo = renderKPIs(ventas);
+  renderChartIngresos(ventas);
+  renderChartProductos(conteo);
+  renderChartPagos(ventas);
+  renderTablaVentas();
+}
+
+onDatosCambiaron(renderTodo);
+renderTodo();
+</script>
+</body>
+</html>
