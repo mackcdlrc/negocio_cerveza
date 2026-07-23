@@ -64,10 +64,14 @@
 
   <div class="panel" style="margin-top:18px;">
     <h2 style="margin-top:0;">Historial de ventas</h2>
+    <p class="hint" style="margin-top:-8px;margin-bottom:14px;">
+      Aquí se listan todas las ventas, incluidas las anuladas y las marcadas como "No pagó".
+      Los ingresos y gráficos de arriba solo cuentan las ventas activas (pagadas).
+    </p>
     <div style="overflow-x:auto;">
       <table>
         <thead>
-          <tr><th>Ticket</th><th>Fecha</th><th>Items</th><th>Total</th><th>Pago</th><th>Estado</th><th></th></tr>
+          <tr><th>Ticket</th><th>Fecha</th><th>Items</th><th>Total</th><th>Pago</th><th>Estado</th><th></th><th></th></tr>
         </thead>
         <tbody id="tabla-ventas"></tbody>
       </table>
@@ -75,6 +79,58 @@
   </div>
 
   <p class="footer-note">Tap &amp; Stock — métricas financieras para Punto Escolar</p>
+</div>
+
+<!-- Modal edición de venta -->
+<div id="modal-editar" class="modal-overlay" style="display:none;">
+  <div class="modal-box modal-box-lg">
+    <h2 style="margin-top:0;">Editar venta <span id="edit-ticket-num" class="mono"></span></h2>
+    <p class="hint">Corrige cantidades, precio, método de pago o marca la venta si el cliente no pagó. Los cambios de cantidad ajustan el stock automáticamente.</p>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="edit-estado">Estado</label>
+        <select id="edit-estado">
+          <option value="activo">Activo (pagado)</option>
+          <option value="pendiente">No pagó / pendiente</option>
+          <option value="anulado">Anulado</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="edit-metodo">Método de pago</label>
+        <select id="edit-metodo">
+          <option>Efectivo</option>
+          <option>Yape</option>
+          <option>Plin</option>
+          <option>Tarjeta</option>
+          <option>Transferencia</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Productos de esta venta</label>
+      <table>
+        <thead><tr><th>Producto</th><th>Cant.</th><th>Precio unit.</th><th>Subtotal</th><th></th></tr></thead>
+        <tbody id="edit-items"></tbody>
+      </table>
+    </div>
+
+    <div class="field">
+      <label for="edit-nota">Motivo del cambio (opcional, queda registrado)</label>
+      <textarea id="edit-nota" rows="2" placeholder="Ej. cliente no pagó, se corrigió cantidad, error de cobro..."></textarea>
+    </div>
+
+    <div class="total-row">
+      <span>Nuevo total</span>
+      <span class="amount mono" id="edit-total">S/ 0.00</span>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn btn-amber" style="flex:1;" onclick="guardarEdicion()">Guardar cambios</button>
+      <button class="btn btn-outline" style="flex:1;" onclick="cerrarEdicion()">Cancelar</button>
+    </div>
+  </div>
 </div>
 
 <script src="js/store.js"></script>
@@ -93,7 +149,7 @@ function ventasEnRango() {
     desde = new Date(ahora.getTime() - 30 * 24 * 3600 * 1000);
   }
   return Store.getVentas().filter(v => {
-    if (v.estado === 'anulado') return false;
+    if (v.estado === 'anulado' || v.estado === 'pendiente') return false;
     if (!desde) return true;
     return new Date(v.fecha) >= desde;
   });
@@ -178,10 +234,17 @@ function renderTablaVentas() {
       <td>${v.items.reduce((s, i) => s + i.cantidad, 0)} u.</td>
       <td class="mono">${Store.formatMoney(v.total)}</td>
       <td>${v.metodoPago}</td>
-      <td><span class="tag ${v.estado}">${v.estado === 'anulado' ? 'Anulado' : 'Activo'}</span></td>
+      <td><span class="tag ${v.estado}">${etiquetaEstado(v.estado)}</span></td>
+      <td><button class="btn btn-outline btn-sm" onclick="abrirEdicion('${v.id}')">Editar</button></td>
       <td>${v.estado === 'anulado' ? '' : `<button class="btn btn-danger btn-sm" onclick="anular('${v.id}')">Anular</button>`}</td>
     </tr>
   `).join('');
+}
+
+function etiquetaEstado(estado) {
+  if (estado === 'anulado') return 'Anulado';
+  if (estado === 'pendiente') return 'No pagó';
+  return 'Activo';
 }
 
 function anular(id) {
@@ -197,6 +260,86 @@ function renderTodo() {
   renderChartProductos(conteo);
   renderChartPagos(ventas);
   renderTablaVentas();
+}
+
+let ventaEnEdicion = null; // copia de trabajo de los items
+
+function abrirEdicion(id) {
+  const venta = Store.getVentas().find(v => v.id === id);
+  if (!venta) return;
+  ventaEnEdicion = { ...venta, items: venta.items.map(i => ({ ...i })) };
+  document.getElementById('edit-ticket-num').textContent = '#' + String(venta.numeroTicket).padStart(5, '0');
+  document.getElementById('edit-estado').value = venta.estado || 'activo';
+  document.getElementById('edit-metodo').value = venta.metodoPago;
+  document.getElementById('edit-nota').value = venta.nota || '';
+  renderItemsEdicion();
+  document.getElementById('modal-editar').style.display = 'flex';
+}
+
+function renderItemsEdicion() {
+  const tbody = document.getElementById('edit-items');
+  tbody.innerHTML = ventaEnEdicion.items.map((i, idx) => `
+    <tr>
+      <td>${i.nombre}</td>
+      <td><input type="number" min="0" step="1" value="${i.cantidad}" style="width:70px;" oninput="cambiarCantidadEdicion(${idx}, this.value)"></td>
+      <td><input type="number" min="0" step="0.10" value="${i.precioUnit}" style="width:90px;" oninput="cambiarPrecioEdicion(${idx}, this.value)"></td>
+      <td class="mono">${Store.formatMoney(i.precioUnit * i.cantidad)}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="quitarItemEdicion(${idx})">×</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="hint">Esta venta ya no tiene productos.</td></tr>';
+  actualizarTotalEdicion();
+}
+
+function cambiarCantidadEdicion(idx, valor) {
+  ventaEnEdicion.items[idx].cantidad = Math.max(0, parseInt(valor, 10) || 0);
+  renderItemsEdicion();
+}
+function cambiarPrecioEdicion(idx, valor) {
+  ventaEnEdicion.items[idx].precioUnit = Math.max(0, parseFloat(valor) || 0);
+  renderItemsEdicion();
+}
+function quitarItemEdicion(idx) {
+  ventaEnEdicion.items.splice(idx, 1);
+  renderItemsEdicion();
+}
+function actualizarTotalEdicion() {
+  const total = ventaEnEdicion.items.reduce((s, i) => s + i.precioUnit * i.cantidad, 0);
+  document.getElementById('edit-total').textContent = Store.formatMoney(total);
+}
+
+function guardarEdicion() {
+  if (!ventaEnEdicion) return;
+  const original = Store.getVentas().find(v => v.id === ventaEnEdicion.id);
+
+  // Repone o descuenta stock según la diferencia entre cantidad original y la nueva
+  original.items.forEach(itemOriginal => {
+    const itemNuevo = ventaEnEdicion.items.find(i => i.productoId === itemOriginal.productoId);
+    const cantidadNueva = itemNuevo ? itemNuevo.cantidad : 0;
+    const diferencia = itemOriginal.cantidad - cantidadNueva; // positivo = repone stock
+    if (diferencia !== 0) Store.ajustarStock(itemOriginal.productoId, diferencia);
+  });
+
+  const total = ventaEnEdicion.items.reduce((s, i) => s + i.precioUnit * i.cantidad, 0);
+  const costoTotal = ventaEnEdicion.items.reduce((s, i) => s + (i.costo || 0) * i.cantidad, 0);
+
+  const ventaActualizada = {
+    ...ventaEnEdicion,
+    total,
+    costoTotal,
+    ganancia: total - costoTotal,
+    metodoPago: document.getElementById('edit-metodo').value,
+    estado: document.getElementById('edit-estado').value,
+    nota: document.getElementById('edit-nota').value.trim(),
+    editado: new Date().toISOString()
+  };
+  Store.actualizarVenta(ventaActualizada);
+  ventaEnEdicion = null;
+  cerrarEdicion();
+  renderTodo();
+}
+
+function cerrarEdicion() {
+  document.getElementById('modal-editar').style.display = 'none';
 }
 
 onDatosCambiaron(renderTodo);
